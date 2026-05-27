@@ -181,4 +181,5 @@ simulate(freq_hz: np.ndarray, theta: np.ndarray) -> np.ndarray
 ```
 
 `RandlesModel` 与 `SEISModel` 都遵守该接口并复用同一套 PEM cost、
-optimizer 与诊断输出。DEIS 及 GCD/SEIS/DEIS 联合辨识仍不属于当前范围。
+optimizer 与诊断输出。
+
