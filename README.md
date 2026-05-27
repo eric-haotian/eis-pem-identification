@@ -9,7 +9,7 @@ DFN-like `Z_cell` 物理参数辨识路径；运行时不要求 MATLAB。
 
 ## Model
 
-首版正向模型为 Randles-like 模型：
+Randles-like 模型是 PEM 闭环中的首个正向阻抗模型，而 PEM 是利用该正向模型进行参数反演的优化方法。
 
 ```text
 Z(w) = Rs + Rct / (1 + j * w * Rct * Cdl)
