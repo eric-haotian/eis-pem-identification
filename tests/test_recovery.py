@@ -4,26 +4,16 @@ import numpy as np
 import pandas as pd
 
 from eis_pem.dataset import EISDataset, generate_synthetic_dataset
-from eis_pem.forward_models import RandlesModel
-from eis_pem.optimizers import DifferentialEvolutionOptimizer
-from eis_pem.parameters import ParameterSpec
+from eis_pem.optimizers import LeastSquaresOptimizer
 from eis_pem.plotting import save_diagnostic_plots
-
-
-def randles_parameter_specs() -> list[ParameterSpec]:
-    return [
-        ParameterSpec("Rs", 0.02, (1e-4, 1e-1), "ohm", log_transform=True),
-        ParameterSpec("Rct", 0.1, (1e-4, 1.0), "ohm", log_transform=True),
-        ParameterSpec("Qdl", 1000.0, (10.0, 1e5), "F", log_transform=True),
-        ParameterSpec("alpha", 0.9, (0.5, 1.0), "-", log_transform=False),
-        ParameterSpec("L", 2e-6, (1e-10, 1e-4), "H", log_transform=True),
-    ]
+from eis_pem.seis_model import SEISModel, default_seis_parameter_specs, default_seis_theta
 
 
 def test_synthetic_recovery_exports_required_artifacts(tmp_path: Path) -> None:
-    model = RandlesModel()
-    theta_true = np.array([0.01, 0.05, 2000.0, 0.8, 1e-6])
-    freq_hz = np.logspace(-2, 5, 100)
+    model = SEISModel()
+    specs = default_seis_parameter_specs()
+    theta_true = default_seis_theta()
+    freq_hz = np.logspace(-3, 5, 100)
     dataset = generate_synthetic_dataset(
         model=model,
         freq_hz=freq_hz,
@@ -32,45 +22,42 @@ def test_synthetic_recovery_exports_required_artifacts(tmp_path: Path) -> None:
         seed=42,
     )
     synthetic_path = tmp_path / "data" / "synthetic_eis.csv"
-    dataset.to_csv(synthetic_path)
+    dataset.to_csv(synthetic_path, impedance_unit="ohm_m2")
 
-    result = DifferentialEvolutionOptimizer().fit(
+    result = LeastSquaresOptimizer(relative=True, max_nfev=5000, n_starts=5).fit(
         dataset=dataset,
         model=model,
-        parameter_specs=randles_parameter_specs(),
+        parameter_specs=specs,
     )
 
-    theta_fit = np.array(
-        [result.theta_best[name] for name in ["Rs", "Rct", "Qdl", "alpha", "L"]]
-    )
+    theta_fit = np.array([result.theta_best[spec.name] for spec in specs])
     relative_error = np.abs(theta_fit - theta_true) / theta_true
-    assert relative_error[0] < 0.05
-    assert relative_error[1] < 0.40
-    assert relative_error[2] < 0.40
-    assert relative_error[3] < 0.05
-    assert relative_error[4] < 0.15
+    assert np.sum(relative_error < 0.25) >= 3
+    assert np.all(relative_error < 1.5)
 
     fit_path = tmp_path / "data" / "fit_result.csv"
-    result.export_fit_csv(fit_path)
-    figure_paths = save_diagnostic_plots(dataset, result, tmp_path / "outputs")
+    result.export_fit_csv(fit_path, impedance_unit="ohm_m2")
+    figure_paths = save_diagnostic_plots(
+        dataset, result, tmp_path / "outputs", impedance_unit="ohm m^2"
+    )
 
     expected_synthetic_columns = [
         "freq_Hz",
-        "Zreal_ohm",
-        "Zimag_ohm",
-        "Zreal_true_ohm",
-        "Zimag_true_ohm",
+        "Zreal_ohm_m2",
+        "Zimag_ohm_m2",
+        "Zreal_true_ohm_m2",
+        "Zimag_true_ohm_m2",
     ]
     expected_fit_columns = [
         "freq_Hz",
-        "Zreal_obs_ohm",
-        "Zimag_obs_ohm",
-        "Zreal_fit_ohm",
-        "Zimag_fit_ohm",
-        "Zreal_true_ohm",
-        "Zimag_true_ohm",
-        "residual_real_ohm",
-        "residual_imag_ohm",
+        "Zreal_obs_ohm_m2",
+        "Zimag_obs_ohm_m2",
+        "Zreal_fit_ohm_m2",
+        "Zimag_fit_ohm_m2",
+        "Zreal_true_ohm_m2",
+        "Zimag_true_ohm_m2",
+        "residual_real_ohm_m2",
+        "residual_imag_ohm_m2",
     ]
     synthetic_frame = pd.read_csv(synthetic_path)
     fit_frame = pd.read_csv(fit_path)
@@ -78,7 +65,7 @@ def test_synthetic_recovery_exports_required_artifacts(tmp_path: Path) -> None:
     assert list(fit_frame.columns) == expected_fit_columns
     assert np.isfinite(synthetic_frame.to_numpy()).all()
     assert np.isfinite(fit_frame.to_numpy()).all()
-    assert EISDataset.from_csv(synthetic_path).z_true is not None
+    assert EISDataset.from_csv(synthetic_path, impedance_unit="ohm_m2").z_true is not None
 
     assert set(figure_paths) == {
         "nyquist_fit",

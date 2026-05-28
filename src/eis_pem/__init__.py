@@ -4,6 +4,7 @@ from .costs import EISPredictionErrorCost
 from .dataset import EISDataset, generate_synthetic_dataset
 from .diagnostics import IdentifiabilityReport, evaluate_local_identifiability
 from .forward_models import ForwardModel, RandlesModel
+from .frontend import dfn_frontend_response_to_frame, simulate_dfn_from_frontend
 from .measurements import (
     ParameterMeasurementDataset,
     generate_synthetic_parameter_measurements,
@@ -37,6 +38,7 @@ __all__ = [
     "IdentifiabilitySelector",
     "IdentifiabilityReport",
     "ForwardModel",
+    "dfn_frontend_response_to_frame",
     "IdentificationResult",
     "ParameterSpec",
     "ParameterMeasurementDataset",
@@ -58,4 +60,5 @@ __all__ = [
     "save_diagnostic_plots",
     "save_joint_identification_plots",
     "save_robust_selection_plots",
+    "simulate_dfn_from_frontend",
 ]

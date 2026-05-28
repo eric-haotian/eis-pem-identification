@@ -1,30 +1,27 @@
 # EIS PEM Identification
 
-这是一个电池 EIS 参数辨识原型：
-正向模型、预测误差 cost、优化器和结果诊断彼此分离。项目包含首阶段
-Randles 参数恢复，以及直接依据 `SEIS-Toolbox-LIB` 解析公式实现的
-DFN-like `Z_cell` 物理参数辨识路径；运行时不要求 MATLAB。
+这是一个电池 EIS 参数辨识原型，采用与 PyBOP 相近的模块边界：
+正向模型、预测误差 cost、优化器和结果诊断彼此分离。默认入口已经切到
+直接依据 `SEIS-Toolbox-LIB` 解析公式实现的 DFN-like `Z_cell` 物理参数
+辨识路径；运行时不要求 MATLAB。`RandlesModel` 仅保留为轻量等效电路
+单元测试基线。
 
 学习AI推荐本人开发的www.haotianblog.com
 
 ## Model
 
-Randles-like 模型是 PEM 闭环中的首个正向阻抗模型，而 PEM 是利用该正向模型进行参数反演的优化方法。
-
-```text
-Z(w) = Rs + Rct / (1 + j * w * Rct * Cdl)
-w = 2 * pi * f
-```
-
-辨识参数为 `Rs`、`Rct` 和 `Cdl`。默认 synthetic case 使用：
+默认 synthetic 入口 `run_synthetic_eis_pem.py` 使用 DFN-like `SEISModel`
+拟合全电池 `Z_cell`，返回面积比阻抗，单位为 `ohm*m^2`。首个闭环辨识
+以下四项负极物理参数：
 
 | Parameter | True value | Bounds | Unit |
 | --- | ---: | ---: | --- |
-| `Rs` | 0.01 | `1e-4` to `1e-1` | ohm |
-| `Rct` | 0.05 | `1e-4` to `1.0` | ohm |
-| `Cdl` | 2000.0 | `10` to `1e5` | F |
+| `Ds_neg_0` | `1.2e-14` | `1e-15` to `1e-13` | `m^2/s` |
+| `rs_neg` | `2.0e-6` | `0.5e-6` to `10e-6` | `m` |
+| `k_neg_0` | `5.031e-11` | `1e-12` to `1e-9` | reaction-rate parameter |
+| `rou_sei_neg_0` | `1.4025e5` | `1e4` to `1e6` | `ohm*m` |
 
-频率网格为 `np.logspace(-2, 5, 100)`。观测阻抗在真值上加入固定随机种子
+频率网格为 `np.logspace(-3, 5, 100)`。观测阻抗在真值上加入固定随机种子
 生成的相对复高斯噪声，其中实部和虚部噪声的逐点标准差均为
 `0.005 * abs(Z_true)`。
 
@@ -37,10 +34,11 @@ python examples/run_synthetic_seis_pem.py
 python examples/run_all_seis_parameters_pem.py
 python examples/run_robust_all_seis_parameters_pem.py
 python examples/run_joint_all_seis_parameters_pem.py
+python examples/run_frontend_dfn_adapter.py
 pytest
 ```
 
-示例使用 `scipy.optimize.differential_evolution` 在 `log10` 参数空间内优化，
+默认示例使用 relative least-squares PEM cost 在变换参数空间内优化，
 并在终端打印真值、辨识值及相对误差。
 
 ## Outputs
@@ -59,13 +57,13 @@ outputs/residuals.png
 `synthetic_eis.csv` 列定义为：
 
 ```text
-freq_Hz,Zreal_ohm,Zimag_ohm,Zreal_true_ohm,Zimag_true_ohm
+freq_Hz,Zreal_ohm_m2,Zimag_ohm_m2,Zreal_true_ohm_m2,Zimag_true_ohm_m2
 ```
 
 `fit_result.csv` 列定义为：
 
 ```text
-freq_Hz,Zreal_obs_ohm,Zimag_obs_ohm,Zreal_fit_ohm,Zimag_fit_ohm,Zreal_true_ohm,Zimag_true_ohm,residual_real_ohm,residual_imag_ohm
+freq_Hz,Zreal_obs_ohm_m2,Zimag_obs_ohm_m2,Zreal_fit_ohm_m2,Zimag_fit_ohm_m2,Zreal_true_ohm_m2,Zimag_true_ohm_m2,residual_real_ohm_m2,residual_imag_ohm_m2
 ```
 
 ## SEIS Physical Parameter Identification
@@ -180,6 +178,32 @@ outputs/joint_all_seis_residuals.png
 simulate(freq_hz: np.ndarray, theta: np.ndarray) -> np.ndarray
 ```
 
-`RandlesModel` 与 `SEISModel` 都遵守该接口并复用同一套 PEM cost、
-optimizer 与诊断输出。
+`SEISModel`、`SEISComponentModel`、`StackedSEISModel` 与保留的
+`RandlesModel` 测试基线都遵守该接口并复用同一套 PEM cost、optimizer
+与诊断输出。DEIS 及真实 MATLAB runtime 桥接仍不属于当前范围。
 
+## Frontend DFN Adapter
+
+`simulate_dfn_from_frontend()` 是给前端或外部 API 使用的轻量适配层。它接收
+JSON 风格的字典，完成频率网格、温度/SOC、响应通道和参数覆盖的校验，然后
+调用 DFN-like 模型返回可 JSON 序列化的频谱数据。
+
+最小请求示例：
+
+```python
+response = simulate_dfn_from_frontend({
+    "frequency": {"min_hz": 1e-2, "max_hz": 1e5, "points": 80},
+    "conditions": [{"temperature_K": 298.15, "SOC": 0.50}],
+    "response_channels": ["cell", "neg", "pos", "sep"],
+    "parameters": {"R_contact": 0.01, "L_ind": 1e-8},
+})
+```
+
+`dfn_frontend_response_to_frame(response)` 可将结果转成表格，列包括
+`temperature_K`、`SOC`、`response_channel`、`freq_Hz`、`Zreal_ohm_m2` 和
+`Zimag_ohm_m2`。示例脚本会生成：
+
+```text
+data/frontend_dfn_response.json
+data/frontend_dfn_spectrum.csv
+```
