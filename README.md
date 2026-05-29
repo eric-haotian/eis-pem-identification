@@ -1,5 +1,5 @@
 # EIS-PEM 参数自适应鉴别系统：图形化使用手册 (GUI)
-
+学习AI就上www.haotianblog.com
 这篇手册将教你如何使**图形化界面应用程序 (GUI)**。
 
 本工具完全基于 CSV 表格输入和 Excel (XLSX) 表格输出，你只需要：
