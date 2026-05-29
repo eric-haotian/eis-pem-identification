@@ -1,7 +1,9 @@
 """Identifiability-aware parameter selection for robust SEIS PEM fits."""
-
+# learning AI website www.haotianblog.com
 from __future__ import annotations
 
+import enum
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
@@ -16,6 +18,21 @@ from .parameters import ParameterSpec
 from .seis_model import DEFAULT_SELECTED_PARAMETER_NAMES
 
 FloatArray = NDArray[np.float64]
+
+logger = logging.getLogger(__name__)
+
+
+class IdentifiabilityStrategy(enum.Enum):
+    """Parameter selection strategy.
+
+    CLASSIC: Original three-stage selection (correlation, SVD, CI95).
+    ADAPTIVE: Four-criterion joint evaluation with iterative refinement.
+              Recommended for real experimental data with noise, limited
+              frequency range, and model mismatch.
+    """
+
+    CLASSIC = "classic"
+    ADAPTIVE = "adaptive"
 
 
 @dataclass(frozen=True)
@@ -129,7 +146,19 @@ class ParameterSelection:
 
 @dataclass(frozen=True)
 class IdentifiabilitySelector:
-    """Select EIS-supported parameters while preserving named target parameters."""
+    """Select EIS-supported parameters while preserving named target parameters.
+
+    Two strategies are available:
+
+    **CLASSIC** (default): Three-stage selection \u2014 correlation pre-screening,
+    SVD condition number reduction, and CI95 pruning. Backward-compatible
+    with the original implementation.
+
+    **ADAPTIVE**: Four-criterion joint evaluation with iterative refinement.
+    Uses rank(J), \u03ba(J), CI95, and parameter correlation together to decide
+    which parameters to fix. Recommended for real experimental data where
+    noise is higher, frequency range is limited, and model mismatch exists.
+    """
 
     max_condition_number: float = 1e4
     assumed_noise_level: float = 0.005
@@ -138,6 +167,13 @@ class IdentifiabilitySelector:
     step_size: float = 1e-5
     eps: float = 1e-12
     covariance_rcond: float = 1e-14
+
+    # Adaptive strategy fields (only used when strategy=ADAPTIVE)
+    strategy: IdentifiabilityStrategy = IdentifiabilityStrategy.CLASSIC
+    min_rank_fraction: float = 0.5
+    max_correlation_threshold: float = 0.95
+    eigenvalue_gap_ratio: float = 100.0
+    max_selection_iterations: int = 50
 
     def __post_init__(self) -> None:
         for name, value in (
@@ -153,6 +189,16 @@ class IdentifiabilitySelector:
             raise ValueError("assumed_noise_level must be finite and non-negative")
         if len(set(self.protected_names)) != len(self.protected_names):
             raise ValueError("protected_names must be unique")
+        if not isinstance(self.strategy, IdentifiabilityStrategy):
+            raise ValueError("strategy must be an IdentifiabilityStrategy")
+        if not 0 < self.min_rank_fraction <= 1:
+            raise ValueError("min_rank_fraction must be in (0, 1]")
+        if not 0 < self.max_correlation_threshold < 1:
+            raise ValueError("max_correlation_threshold must be in (0, 1)")
+        if not np.isfinite(self.eigenvalue_gap_ratio) or self.eigenvalue_gap_ratio <= 1:
+            raise ValueError("eigenvalue_gap_ratio must be finite and > 1")
+        if self.max_selection_iterations < 1:
+            raise ValueError("max_selection_iterations must be >= 1")
 
     def select(
         self,
@@ -183,6 +229,20 @@ class IdentifiabilitySelector:
             step_size=self.step_size,
             eps=self.eps,
         )
+
+        if self.strategy == IdentifiabilityStrategy.ADAPTIVE:
+            return self._select_adaptive(jacobian, specs, parameter_names, reference)
+        return self._select_classic(jacobian, specs, parameter_names, reference)
+
+    def _select_classic(
+        self,
+        jacobian: FloatArray,
+        specs: tuple[ParameterSpec, ...],
+        parameter_names: tuple[str, ...],
+        reference: FloatArray,
+    ) -> ParameterSelection:
+        """Original three-stage selection: correlation, SVD, CI95."""
+
         full_singular_values, original_condition_number = _spectrum(jacobian)
         active = list(range(len(specs)))
         fixed_values: dict[str, float] = {}
@@ -268,6 +328,200 @@ class IdentifiabilitySelector:
             reasons[name] = "predicted_ci95_above_limit"
             ci95[name] = float(removed_ci95)
 
+        selected_singular_values, reduced_condition_number = _spectrum(
+            jacobian[:, active]
+        )
+        selected_ci95 = _relative_ci95(
+            jacobian[:, active],
+            [specs[index] for index in active],
+            reference[active],
+            self.assumed_noise_level,
+            self.covariance_rcond,
+        )
+        for position, index in enumerate(active):
+            name = parameter_names[index]
+            ci95[name] = float(selected_ci95[position])
+            if name in protected and selected_ci95[position] > self.max_relative_ci95:
+                statuses[name] = "protected_high_uncertainty"
+                reasons[name] = "protected_parameter_retained_despite_ci95_limit"
+
+        return ParameterSelection(
+            parameter_names=parameter_names,
+            reference_values=dict(zip(parameter_names, reference, strict=True)),
+            free_names=tuple(parameter_names[index] for index in active),
+            fixed_values=fixed_values,
+            statuses=statuses,
+            reasons=reasons,
+            ci95_relative=ci95,
+            original_singular_values=full_singular_values,
+            selected_singular_values=selected_singular_values,
+            original_condition_number=original_condition_number,
+            reduced_condition_number=reduced_condition_number,
+            assumed_noise_level=self.assumed_noise_level,
+            max_condition_number=self.max_condition_number,
+            max_relative_ci95=self.max_relative_ci95,
+            protected_names=self.protected_names,
+        )
+
+    def _select_adaptive(
+        self,
+        jacobian: FloatArray,
+        specs: tuple[ParameterSpec, ...],
+        parameter_names: tuple[str, ...],
+        reference: FloatArray,
+    ) -> ParameterSelection:
+        """Four-criterion adaptive selection with iterative refinement.
+
+        Simultaneously evaluates rank(J), κ(J), CI95, and parameter
+        correlation at each iteration. Unlike the classic mode which
+        applies criteria sequentially, the adaptive mode re-evaluates
+        all four diagnostics after each parameter fixation, choosing
+        the single worst-offending parameter to fix at each step.
+
+        This prevents over-aggressive pruning that can occur when
+        sequential stages interact poorly.
+        """
+
+        full_singular_values, original_condition_number = _spectrum(jacobian)
+        active = list(range(len(specs)))
+        fixed_values: dict[str, float] = {}
+        statuses = {name: "estimated" for name in parameter_names}
+        reasons = {
+            name: "selected_under_identifiability_thresholds"
+            for name in parameter_names
+        }
+        ci95 = {name: float("nan") for name in parameter_names}
+        protected = set(self.protected_names)
+
+        for iteration in range(self.max_selection_iterations):
+            if len(active) <= len(protected):
+                break
+
+            active_jacobian = jacobian[:, active]
+            n_active = len(active)
+
+            # --- Criterion 1: Rank deficiency ---
+            singular_values = np.linalg.svd(active_jacobian, compute_uv=False)
+            effective_rank = _effective_rank(
+                singular_values, self.eigenvalue_gap_ratio
+            )
+            min_required_rank = max(
+                1, int(np.ceil(n_active * self.min_rank_fraction))
+            )
+            rank_deficient = effective_rank < min_required_rank
+
+            # --- Criterion 2: Condition number ---
+            condition_number = _condition_number(singular_values)
+            ill_conditioned = condition_number > self.max_condition_number
+
+            # --- Criterion 3: CI95 ---
+            active_ci95 = _relative_ci95(
+                active_jacobian,
+                [specs[index] for index in active],
+                reference[active],
+                self.assumed_noise_level,
+                self.covariance_rcond,
+            )
+
+            # --- Criterion 4: Correlation ---
+            information = active_jacobian.T @ active_jacobian
+            diag = np.sqrt(np.maximum(np.diag(information), 0.0))
+            with np.errstate(divide="ignore", invalid="ignore"):
+                outer = np.outer(diag, diag)
+                corr = np.where(outer > 0, information / outer, 0.0)
+            np.fill_diagonal(corr, 0.0)
+            max_abs_corr = np.max(np.abs(corr)) if corr.size > 0 else 0.0
+            high_correlation = max_abs_corr > self.max_correlation_threshold
+
+            # --- Check if all criteria pass ---
+            all_ci95_ok = all(
+                active_ci95[pos] <= self.max_relative_ci95
+                or parameter_names[active[pos]] in protected
+                for pos in range(n_active)
+            )
+
+            if (
+                not rank_deficient
+                and not ill_conditioned
+                and all_ci95_ok
+                and not high_correlation
+            ):
+                logger.info(
+                    "Adaptive selection converged after %d iterations: "
+                    "%d free parameters, κ=%.2e, rank=%d/%d",
+                    iteration,
+                    n_active,
+                    condition_number,
+                    effective_rank,
+                    n_active,
+                )
+                break
+
+            # --- Score each non-protected parameter for removal ---
+            # Higher score = more likely to be fixed
+            removal_scores: list[tuple[float, int, str]] = []
+            sensitivity_norms = np.linalg.norm(active_jacobian, axis=0)
+            max_sens = np.max(sensitivity_norms) if sensitivity_norms.size > 0 else 1.0
+
+            for pos in range(n_active):
+                idx = active[pos]
+                if parameter_names[idx] in protected:
+                    continue
+
+                score = 0.0
+                reason_parts = []
+
+                # CI95 penalty
+                ci_val = active_ci95[pos]
+                if ci_val > self.max_relative_ci95:
+                    score += 10.0 * (ci_val / self.max_relative_ci95)
+                    reason_parts.append("high_ci95")
+
+                # Correlation penalty — max |ρ| with any other parameter
+                max_corr_for_param = np.max(np.abs(corr[pos, :])) if n_active > 1 else 0.0
+                if max_corr_for_param > self.max_correlation_threshold:
+                    score += 5.0 * max_corr_for_param
+                    reason_parts.append("high_correlation")
+
+                # Low sensitivity penalty (inverse of normalised sensitivity)
+                rel_sens = sensitivity_norms[pos] / max_sens if max_sens > 0 else 0.0
+                score += 1.0 * (1.0 - rel_sens)
+                if rel_sens < 0.01:
+                    reason_parts.append("near_zero_sensitivity")
+
+                # Singular direction alignment penalty (if ill-conditioned)
+                if ill_conditioned and singular_values.size > 0:
+                    _, _, vt = np.linalg.svd(active_jacobian, full_matrices=False)
+                    alignment = abs(vt[-1, pos]) if vt.shape[0] > 0 else 0.0
+                    score += 3.0 * alignment
+                    if alignment > 0.3:
+                        reason_parts.append("weak_singular_direction")
+
+                reason_str = "+".join(reason_parts) if reason_parts else "low_sensitivity"
+                removal_scores.append((score, pos, reason_str))
+
+            if not removal_scores:
+                break
+
+            # Remove the parameter with the highest score
+            removal_scores.sort(reverse=True)
+            _, removal_pos, removal_reason = removal_scores[0]
+            idx = active.pop(removal_pos)
+            name = parameter_names[idx]
+            fixed_values[name] = specs[idx].initial_value
+            statuses[name] = "fixed_identifiability"
+            reasons[name] = f"adaptive_{removal_reason}"
+            ci95[name] = float(active_ci95[removal_pos])
+
+            logger.debug(
+                "Iteration %d: fixed %s (reason=%s, ci95=%.4f)",
+                iteration,
+                name,
+                removal_reason,
+                active_ci95[removal_pos],
+            )
+
+        # --- Final diagnostics on remaining active set ---
         selected_singular_values, reduced_condition_number = _spectrum(
             jacobian[:, active]
         )
@@ -392,6 +646,38 @@ def _condition_number(singular_values: FloatArray) -> float:
     if singular_values.size == 0 or singular_values[-1] <= 0:
         return float("inf")
     return float(singular_values[0] / singular_values[-1])
+
+
+def _effective_rank(
+    singular_values: FloatArray, gap_threshold: float = 100.0
+) -> int:
+    """Effective rank based on eigenvalue gap analysis.
+
+    More conservative than numerical rank.  Scans singular values from
+    largest to smallest; the effective rank is the position just before
+    the first gap whose ratio exceeds *gap_threshold*.
+
+    Parameters
+    ----------
+    singular_values
+        Sorted (descending) singular values from an SVD.
+    gap_threshold
+        A consecutive ratio ``σ_i / σ_{i+1} > gap_threshold`` defines
+        a gap.  Default 100.
+    """
+
+    values = np.asarray(singular_values, dtype=float)
+    if values.size == 0:
+        return 0
+    # Drop numerically zero entries
+    positive = values[values > 0]
+    if positive.size <= 1:
+        return int(positive.size)
+    for k in range(positive.size - 1):
+        ratio = positive[k] / positive[k + 1]
+        if ratio > gap_threshold:
+            return k + 1
+    return int(positive.size)
 
 
 def _relative_ci95(

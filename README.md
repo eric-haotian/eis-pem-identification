@@ -1,209 +1,65 @@
-# EIS PEM Identification
+# EIS-PEM 参数自适应鉴别系统：零基础图形化使用手册 (GUI)
 
-这是一个电池 EIS 参数辨识原型，采用与 PyBOP 相近的模块边界：
-正向模型、预测误差 cost、优化器和结果诊断彼此分离。默认入口已经切到
-直接依据 `SEIS-Toolbox-LIB` 解析公式实现的 DFN-like `Z_cell` 物理参数
-辨识路径；运行时不要求 MATLAB。`RandlesModel` 仅保留为轻量等效电路
-单元测试基线。
+如果你没有任何编程基础，或者希望像使用商业软件一样通过“点击按钮”来分析你的电化学阻抗谱 (EIS) 数据，这篇手册将教你如何使用我们开发的**图形化界面应用程序 (GUI)**。
 
-学习AI推荐本人开发的www.haotianblog.com
+本工具完全基于 CSV 表格输入和 Excel (XLSX) 表格输出，你只需要：
+1. 准备好包含测试数据的 `.csv` 表格。
+2. 双击运行程序，用鼠标选择文件并点击“Run”。
+3. 打开自动生成的 `.xlsx` 文件查看所有物理参数。
 
-## Model
+---
 
-默认 synthetic 入口 `run_synthetic_eis_pem.py` 使用 DFN-like `SEISModel`
-拟合全电池 `Z_cell`，返回面积比阻抗，单位为 `ohm*m^2`。首个闭环辨识
-以下四项负极物理参数：
+## 1. 准备输入数据 (`input.csv`)
 
-| Parameter | True value | Bounds | Unit |
-| --- | ---: | ---: | --- |
-| `Ds_neg_0` | `1.2e-14` | `1e-15` to `1e-13` | `m^2/s` |
-| `rs_neg` | `2.0e-6` | `0.5e-6` to `10e-6` | `m` |
-| `k_neg_0` | `5.031e-11` | `1e-12` to `1e-9` | reaction-rate parameter |
-| `rou_sei_neg_0` | `1.4025e5` | `1e4` to `1e6` | `ohm*m` |
+你需要将实验数据整理为一个标准的逗号分隔值表格 (`.csv`) 文件。你可以使用 Excel 整理数据，然后点击“另存为 -> CSV (逗号分隔)”。
 
-频率网格为 `np.logspace(-3, 5, 100)`。观测阻抗在真值上加入固定随机种子
-生成的相对复高斯噪声，其中实部和虚部噪声的逐点标准差均为
-`0.005 * abs(Z_true)`。
+你的表格**必须且仅需**包含以下五个表头（请完全匹配拼写）：
+* `Frequency_Hz`: 频率（赫兹）
+* `Re_Z`: 阻抗实部（欧姆）
+* `Im_Z`: 阻抗虚部（欧姆）
+* `Temperature_K`: 绝对温度（开尔文，例如 25°C = 298.15 K）
+* `SOC`: 电池荷电状态（0 到 1 之间的小数）
 
-## Installation And Run
+> [!TIP]
+> **如何进行牛逼的多工况联合拟合？**
+> 本软件最强大的地方在于可以同时处理多个温度和 SOC 的谱图！你只需要把所有谱图的数据**首尾相连垂直拼在同一个 CSV 表格里**，并在对应的 `Temperature_K` 和 `SOC` 列中标明它们属于哪个工况即可。系统会自动读取并进行高维物理联合解耦！
+
+---
+
+## 2. 运行图形化主程序
+
+确保你的电脑安装了 Python 后，进入代码目录，运行我们为你准备好的主程序：
 
 ```bash
-python -m pip install -e ".[test]"
-python examples/run_synthetic_eis_pem.py
-python examples/run_synthetic_seis_pem.py
-python examples/run_all_seis_parameters_pem.py
-python examples/run_robust_all_seis_parameters_pem.py
-python examples/run_joint_all_seis_parameters_pem.py
-python examples/run_frontend_dfn_adapter.py
-pytest
+python eis_pem_gui.py
 ```
 
-默认示例使用 relative least-squares PEM cost 在变换参数空间内优化，
-并在终端打印真值、辨识值及相对误差。
+此时会弹出一个非常清爽的图形化窗口，分为三个部分：
+1. **文件选择区**：点击 `Browse...` 按钮，选择你刚刚准备好的 `.csv` 数据文件。
+2. **参数配置区**：
+   - **Expected Noise Level**: 预期噪声比例。通常填 `0.01` (1%) 或 `0.03` (3%)。如果你的数据很脏，系统会自动开启物理清洗器过滤杂音。
+   - **Random Starts**: 多起点搜索次数。填 `3` 或 `5` 即可，保证优化器不会卡在死胡同里。
+3. **运行与日志区**：点击硕大的 **▶ RUN IDENTIFICATION** 按钮。你会看到下方的黑色日志框里实时打印出系统清洗数据、SVD 降维诊断以及算法收敛的全过程（界面不会假死！）。
 
-## Outputs
+---
 
-运行示例后会生成：
+## 3. 如何看懂 Excel 输出结果 (`_Results.xlsx`)
 
-```text
-data/synthetic_eis.csv
-data/fit_result.csv
-outputs/nyquist_fit.png
-outputs/bode_magnitude_fit.png
-outputs/bode_phase_fit.png
-outputs/residuals.png
-```
+当黑色日志框提示 `Success!` 并在屏幕弹出成功提示弹窗后，你选择的那个 `.csv` 文件的同目录下会自动生成一个格式排版好的 `_Results.xlsx` Excel 文件。
 
-`synthetic_eis.csv` 列定义为：
+打开这个 Excel 文件，里面有两张 Sheet：
 
-```text
-freq_Hz,Zreal_ohm_m2,Zimag_ohm_m2,Zreal_true_ohm_m2,Zimag_true_ohm_m2
-```
+### Sheet 1: `Summary_Diagnostics`
+这里记录了整体的拟合状态，比如总均方根误差 (RMSE)。
 
-`fit_result.csv` 列定义为：
+### Sheet 2: `Parameters` (核心结果)
+这里逐行列出了所有 48 个微观物理参数。你会看到以下列：
+* **`Parameter`**: 参数名（如固相扩散系数、孔隙率等）。
+* **`Initial/Reference`**: 系统自带的物理基准初值。
+* **`Fitted_Value`**: 系统推算出的实际参数值。
+* **`CI95_Absolute`**: 95% 置信度的绝对误差！**这是科学价值最高的部分。**
+* **`Status`**: 该参数的状态。
+  - **`Fitted` (成功识别)**：恭喜，你的数据足以独立解耦这个参数！
+  - **`Fixed` (被冻结)**：不要紧张！这意味着系统诊断出当前的数据不足以支撑该参数的独立识别（要么因为噪声太大，要么因为缺乏多工况支撑）。为了你的科研严谨性，系统拒绝瞎猜，强行将其固定在了基准值上。
 
-```text
-freq_Hz,Zreal_obs_ohm_m2,Zimag_obs_ohm_m2,Zreal_fit_ohm_m2,Zimag_fit_ohm_m2,Zreal_true_ohm_m2,Zimag_true_ohm_m2,residual_real_ohm_m2,residual_imag_ohm_m2
-```
-
-## SEIS Physical Parameter Identification
-
-`SEISModel` 将上游 MATLAB 工具箱的 `Parameters_update`、
-`Model_particle_calculate` 与 `Model_DFN_calculate` 的 `Z_cell` 计算路径
-移植到 Python。返回值是面积比阻抗，单位为 `ohm*m^2`。
-
-当前同时辨识工具箱移交说明和论文敏感度脚本指定的全部四项负极物理参数：
-
-| Parameter | Toolbox default | Bounds | Unit |
-| --- | ---: | ---: | --- |
-| `Ds_neg_0` | `1.2e-14` | `1e-15` to `1e-13` | `m^2/s` |
-| `rs_neg` | `2.0e-6` | `0.5e-6` to `10e-6` | `m` |
-| `k_neg_0` | `5.031e-11` | `1e-12` to `1e-9` | reaction-rate parameter |
-| `rou_sei_neg_0` | `1.4025e5` | `1e4` to `1e6` | `ohm*m` |
-
-`run_synthetic_seis_pem.py` 在 `298.15 K`、`SOC=1.0`、`0.5%` 相对复噪声
-条件下生成 synthetic `Z_cell`，用 relative PEM cost 在 log-space 中同步
-辨识以上四项参数。它生成：
-
-```text
-data/synthetic_seis.csv
-data/seis_fit_result.csv
-data/seis_identified_parameters.csv
-outputs/seis_nyquist_fit.png
-outputs/seis_bode_magnitude_fit.png
-outputs/seis_bode_phase_fit.png
-outputs/seis_residuals.png
-```
-
-### All Scalar Physical Inputs
-
-`run_all_seis_parameters_pem.py` 提供完整参数化运行路径。它将上游
-`Parameters_initialize.m` 中实际进入 SEIS 公式的全部 `48` 项独立标量
-物理输入同时作为优化变量，包括正负极反应、扩散、几何、孔隙率、导电率、
-电解液、SEI、化学计量端点和 Arrhenius 活化能参数。
-
-为使温度活化能和 SOC 相关参数进入观测，完整运行使用 `5` 个温度与 `5`
-个 SOC 组成的 `25` 工况 synthetic 实验，每工况 `60` 个频率点。它输出：
-
-```text
-data/synthetic_all_seis_experiments.csv
-data/all_seis_fit_result.csv
-data/all_seis_identified_parameters.csv
-data/all_seis_identifiability.csv
-data/all_seis_singular_values.csv
-```
-
-该运行保留 `F`、`R`、参考温度 `T_0` 作为物理常量，并保留文献给定的 OCP
-函数形式；温度与 SOC 是实验条件而不是电池待辨识参数。局部 Jacobian
-诊断必须与参数结果一起解读：完整参数化问题即使在多工况、无噪声
-synthetic 数据上也可能高度病态，因此近零残差不等于全部参数均具有唯一、
-抗噪声的物理识别结果。
-
-### Robust All-Parameter Workflow
-
-`run_robust_all_seis_parameters_pem.py` 在相同的 `25` 工况设计上加入 `0.5%`
-相对复高斯噪声，并使用分阶段可辨识性选择，而不是将 `48` 项全部声明为
-可独立辨识：
-
-1. 在 relative-residual、参数变换空间中计算局部 Jacobian 与奇异值；
-2. 固定弱奇异方向主导的非保护参数，直至自由子问题条件数不超过 `1e4`；
-3. 在假定 `0.5%` 噪声下继续固定预测 `95%` 相对区间超过 `10%` 的非保护参数；
-4. 始终保留 `Ds_neg_0`、`rs_neg`、`k_neg_0` 与 `rou_sei_neg_0` 作为保护目标，
-   若其预测区间超限则以警告状态报告而不是静默固定。
-
-完整 `48` 项参数仍写入结果文件；状态为 `fixed_identifiability` 的项目使用
-工具箱名义值作为显式假设，其值不被表述为 EIS 独立恢复结果。稳健运行生成：
-
-```text
-data/robust_all_seis_fit_result.csv
-data/robust_all_seis_parameters.csv
-data/robust_all_seis_selection.csv
-data/robust_all_seis_singular_values.csv
-outputs/robust_all_seis_parameter_uncertainty.png
-outputs/robust_all_seis_singular_values.png
-outputs/robust_all_seis_residuals.png
-```
-
-### Joint Identification Of All 48 Parameters
-
-`run_joint_all_seis_parameters_pem.py` 提供一个所有 `48` 项均作为自由变量的
-synthetic 闭环。该流程不声称全电池单通道 EIS 能单独支撑全部参数，而是将
-工具箱 `Model_DFN_calculate.m` 已定义的区域解耦谱 `Z_neg`、`Z_pos`、
-`Z_sep` 与独立物性校准读数共同纳入同一个 relative PEM 目标函数。
-
-流程先以区域谱诊断 EIS-only 问题，自动确定仍需独立校准的信息。本 benchmark
-中需校准 `12` 项参数，每项模拟 `9` 次 `0.5%` 相对噪声读数；随后全部
-`48` 项进入同一个 least-squares 自由向量，不再固定任何参数。输出包括：
-
-```text
-data/joint_decoupled_seis_observations.csv
-data/joint_all_seis_fit_result.csv
-data/joint_all_seis_parameters.csv
-data/joint_all_seis_auxiliary_measurements.csv
-data/joint_decoupled_eis_only_selection.csv
-data/joint_all_seis_identifiability.csv
-data/joint_all_seis_singular_values.csv
-outputs/joint_all_seis_singular_values.png
-outputs/joint_all_seis_residuals.png
-```
-
-该闭环证明在“解耦频谱 + 明确记录的辅助物性数据”条件下可稳定估计全部参数。
-它不等价于仅从普通全电池 EIS 或尚未提供的真实实验数据中恢复全部物理参数。
-
-## Model Contract
-
-`ForwardModel` 的固定接口为：
-
-```python
-simulate(freq_hz: np.ndarray, theta: np.ndarray) -> np.ndarray
-```
-
-`SEISModel`、`SEISComponentModel`、`StackedSEISModel` 与保留的
-`RandlesModel` 测试基线都遵守该接口并复用同一套 PEM cost、optimizer
-与诊断输出。DEIS 及真实 MATLAB runtime 桥接仍不属于当前范围。
-
-## Frontend DFN Adapter
-
-`simulate_dfn_from_frontend()` 是给前端或外部 API 使用的轻量适配层。它接收
-JSON 风格的字典，完成频率网格、温度/SOC、响应通道和参数覆盖的校验，然后
-调用 DFN-like 模型返回可 JSON 序列化的频谱数据。
-
-最小请求示例：
-
-```python
-response = simulate_dfn_from_frontend({
-    "frequency": {"min_hz": 1e-2, "max_hz": 1e5, "points": 80},
-    "conditions": [{"temperature_K": 298.15, "SOC": 0.50}],
-    "response_channels": ["cell", "neg", "pos", "sep"],
-    "parameters": {"R_contact": 0.01, "L_ind": 1e-8},
-})
-```
-
-`dfn_frontend_response_to_frame(response)` 可将结果转成表格，列包括
-`temperature_K`、`SOC`、`response_channel`、`freq_Hz`、`Zreal_ohm_m2` 和
-`Zimag_ohm_m2`。示例脚本会生成：
-
-```text
-data/frontend_dfn_response.json
-data/frontend_dfn_spectrum.csv
-```
+用这套 GUI，你就能享受到和最顶尖算法实验室同等的数据分析能力！

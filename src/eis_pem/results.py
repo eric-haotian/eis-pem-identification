@@ -1,5 +1,5 @@
 """Structured identification result output."""
-
+# learning AI website www.haotianblog.com
 from __future__ import annotations
 
 from dataclasses import dataclass, field

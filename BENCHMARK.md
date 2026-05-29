@@ -1,5 +1,31 @@
 # 性能与辨识精度对比基准报告 (Benchmark Report): SEISModel vs. Oxford PyBOP
 
+> **校验更新**：为了避免把同模型 synthetic 闭环误读成真实实验优势，新增了
+> [`examples/validate_parameter_recovery_vs_pybop.py`](file:///Users/zhonghaotian/Desktop/battery/eis_pem_identification/examples/validate_parameter_recovery_vs_pybop.py)。
+> 该脚本使用 `~/Projects/pybop-local/.venv` 中的 PyBOP 26.3，分别输出两套模型的
+> 初值、边界、真值、辨识值、相对误差、残差指标和局部敏感度。默认运行现在按
+> “尽可能多鉴别参数”的策略执行：SEISModel 从 `48` 个 SEIS 候选参数中筛出并拟合
+> `32` 个局部可辨识参数，其余 `16` 个作为不可独立鉴别项固定并记录；PyBOP
+> GroupedSPM 同时拟合 `13` 个 grouped 参数，但局部 Jacobian rank 为 `9`，其中
+> `4` 个变量在该电压输出下为零敏感度。下面旧表格中的“优势”应仅作为历史 benchmark
+> 摘要，不能作为真实电芯数据上的结论。
+
+复现校验：
+
+```bash
+/Users/zhonghaotian/Projects/pybop-local/.venv/bin/python examples/validate_parameter_recovery_vs_pybop.py
+```
+
+输出文件：
+
+```text
+data/validation_summary_vs_pybop.csv
+data/validation_parameter_recovery_vs_pybop.csv
+data/validation_fit_traces_vs_pybop.csv
+data/validation_singular_values_vs_pybop.csv
+data/validation_seis_selection_vs_pybop.csv
+```
+
 本报告展示了本项目优化的物理参数辨识模型（**SEISModel**）与牛津大学开发的 **PyBOP** 电池参数估算框架在计算效率、模型复杂度、优化算法以及物理逼真度方面的性能表现。
 
 ---

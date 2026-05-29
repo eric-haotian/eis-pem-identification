@@ -1,5 +1,5 @@
 """Python SEIS/DFN-like forward model based on SEIS-Toolbox-LIB equations."""
-
+# learning AI website www.haotianblog.com
 from __future__ import annotations
 
 from dataclasses import dataclass
