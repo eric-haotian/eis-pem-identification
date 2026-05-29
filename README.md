@@ -67,3 +67,4 @@ python eis_pem_gui.py
   - **`Fixed` (被冻结)**：不要紧张！这意味着系统诊断出当前的数据不足以支撑该参数的独立识别（要么因为噪声太大，要么因为缺乏多工况支撑）。为了你的科研严谨性，系统拒绝瞎猜。
 
 在优化的SEISModel 中，共有 48 项 独立标量物理输入作为优化变量。在ALL_Parameters.md文件中。
+Input_Spectra_25Conditions.csv 为推荐测试用数据集。
