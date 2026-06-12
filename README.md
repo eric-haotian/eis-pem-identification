@@ -158,7 +158,7 @@ This behavior is designed to improve physical reliability and prevent overfittin
 
 For best results, use clean spectra collected across multiple temperatures and SOC values.
 
-# Then chinese introduction
+# Then introduction in Chinese
 
 # EIS-PEM 参数自适应鉴别系统：图形化使用手册 (GUI)
 学习AI就上www.haotianblog.com
