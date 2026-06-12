@@ -1,3 +1,165 @@
+# EIS-PEM Adaptive Parameter Identification System: GUI User Manual
+
+> Learn AI at [www.haotianblog.com](https://www.haotianblog.com)
+
+This manual explains how to use the **graphical user interface (GUI)** application for EIS-PEM parameter identification.
+
+This tool uses CSV files as input and Excel workbooks (`.xlsx`) as output. The basic workflow is simple:
+
+1. Prepare a `.csv` file containing the test data.
+2. Double-click or run the program, select the input file, and click **Run**.
+3. Open the automatically generated `.xlsx` file to review all identified physical parameters.
+
+---
+
+## 1. Prepare the Input Data (`input.csv`)
+
+You need to organize your experimental data into a standard comma-separated values file (`.csv`). You may use Excel to prepare the table, then select **Save As → CSV (Comma delimited)**.
+
+The input table **must contain only the following five column headers**, and the spelling must match exactly:
+
+| Column Name | Description |
+|---|---|
+| `Frequency_Hz` | Frequency in hertz (Hz) |
+| `Re_Z` | Real part of impedance, in ohms (Ω) |
+| `Im_Z` | Imaginary part of impedance, in ohms (Ω) |
+| `Temperature_K` | Absolute temperature in kelvin. For example, 25°C = 298.15 K |
+| `SOC` | Battery state of charge, expressed as a decimal between 0 and 1 |
+
+> [!TIP]
+> **How do I perform multi-condition joint fitting? This is required.**
+>
+> The software can process spectra measured at multiple temperatures and SOC values at the same time. You only need to vertically concatenate all spectra into a single CSV file, one after another, and specify the corresponding `Temperature_K` and `SOC` values for each row.
+>
+> The system will automatically read the combined table and perform high-dimensional physics-based joint decoupling.
+>
+> At least **3 different temperatures** and **3 different SOC values** are required. Using **5 or more** different conditions is recommended for better identification performance.
+
+---
+
+## 2. Run the GUI Main Program
+
+Make sure Python is installed on your computer. Then enter the project directory:
+
+```bash
+cd your_installation_path/eis_pem_identification
+```
+
+Run the GUI program:
+
+```bash
+python eis_pem_gui.py
+```
+
+A clean graphical interface will appear. The GUI contains three main sections:
+
+### 2.1 File Selection
+
+Click the **Browse...** button and select the `.csv` data file you prepared.
+
+### 2.2 Parameter Configuration
+
+Configure the following options before running the identification:
+
+| Option | Description |
+|---|---|
+| **Expected Noise Level** | Expected noise ratio. Typical values are `0.01` for 1% noise or `0.03` for 3% noise. If the data are noisy, the system will automatically activate the physics-based data cleaner to filter noise. For larger datasets, the program becomes more conservative, so this value should be adjusted appropriately. |
+| **Random Starts** | Number of multi-start optimization attempts. Values such as `3` or `5` are usually sufficient. This helps prevent the optimizer from becoming trapped in poor local minima. |
+| **Error Strictness (`max_ci95`)** | Error tolerance threshold. A larger value means the system allows higher uncertainty. |
+
+### 2.3 Run and Log Output
+
+Click **▶ RUN IDENTIFICATION**.
+
+The black log window will print the full workflow in real time, including data cleaning, SVD-based dimensionality diagnostics, and algorithm convergence.
+
+---
+
+## 3. Understand the Excel Output (`_Results.xlsx`)
+
+When the log window shows `Success!` and a success dialog appears, the program automatically generates a formatted `_Results.xlsx` file in the same directory as the selected `.csv` file.
+
+Open the Excel workbook. It contains two sheets.
+
+---
+
+### Sheet 1: `Summary_Diagnostics`
+
+This sheet records the overall fitting status, including metrics such as the total root mean square error (RMSE).
+
+---
+
+### Sheet 2: `Parameters`
+
+This is the core result sheet.
+
+It lists all **48 microscopic physical parameters** row by row. The main columns are:
+
+| Column | Description |
+|---|---|
+| `Parameter` | Parameter name, such as solid-phase diffusion coefficient, porosity, and other physical quantities |
+| `Initial/Reference` | Built-in physical reference value used by the system |
+| `Fitted_Value` | Actual parameter value inferred by the system |
+| `CI95_Absolute` | Absolute error at 95% confidence |
+| `Status` | Identification status of the parameter |
+
+The `Status` column may contain the following values:
+
+| Status | Meaning |
+|---|---|
+| `Fitted` | The parameter was successfully identified. This means the input data contain enough information to independently decouple this parameter. |
+| `Fixed` | The parameter was frozen. This is expected when the current data do not contain enough information to support independent identification of that parameter, either because the noise level is too high or because the dataset lacks sufficient multi-condition support. For scientific rigor, the system avoids unsupported parameter guessing. |
+
+---
+
+## 4. Notes on Model Parameters and Example Data
+
+The optimized `SEISModel` contains **48 independent scalar physical inputs** as optimization variables.
+
+For the complete parameter list, see:
+
+```text
+ALL_Parameters.md
+```
+
+The recommended test dataset is:
+
+```text
+Input_Spectra_25Conditions.csv
+```
+
+Use this example dataset to verify that the GUI and identification workflow are functioning correctly before processing your own experimental data.
+
+---
+
+## 5. Recommended Workflow
+
+1. Prepare the CSV file with the required five columns.
+2. Ensure the dataset includes at least 3 different temperatures and 3 different SOC values.
+3. Run `eis_pem_gui.py`.
+4. Select the input CSV file in the GUI.
+5. Set the expected noise level, random starts, and error strictness.
+6. Click **▶ RUN IDENTIFICATION**.
+7. Open the generated `_Results.xlsx` file.
+8. Check `Summary_Diagnostics` first, then inspect the detailed parameter results in `Parameters`.
+
+---
+
+## 6. Output Interpretation Summary
+
+A successful result does not necessarily mean all 48 parameters will be marked as `Fitted`.
+
+In practice:
+
+- `Fitted` means the parameter is independently identifiable from the current data.
+- `Fixed` means the software intentionally kept the parameter fixed because the data do not provide enough independent information.
+
+This behavior is designed to improve physical reliability and prevent overfitting.
+
+For best results, use clean spectra collected across multiple temperatures and SOC values.
+
+# Then chinese introduction
+
 # EIS-PEM 参数自适应鉴别系统：图形化使用手册 (GUI)
 学习AI就上www.haotianblog.com
 这篇手册将教你如何使**图形化界面应用程序 (GUI)**。
